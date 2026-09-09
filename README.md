@@ -96,7 +96,8 @@ GET /sessions?status=active&gateway=gw-eu-1
 Install the Python dependencies:
 
 ```bash
-uv pip install -r requirements.txt
+uv venv
+uv pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 Run the frontend:
