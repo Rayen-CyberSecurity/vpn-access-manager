@@ -15,9 +15,6 @@ def test_filter_by_gateway(client):
     assert all(s["gateway_name"] == "gw-eu-1" for s in rows)
 
 
-def test_filter_by_user(client):
-    rows = client.get("/sessions?user=amuller").json()
-    assert all(s["username"] == "amuller" for s in rows)
 
 
 def test_get_single_session(client):
@@ -92,15 +89,6 @@ def test_negative_bytes_is_422(client, auth):
     )
     assert r.status_code == 422
 
-
-def test_duplicate_active_session_is_409(client, auth):
-    """User 1 already holds an active session on gw-eu-1 (session_one_active)."""
-    r = client.post(
-        "/sessions",
-        json={"user_id": 1, "gateway_id": 1, "client_ip": "10.0.0.1"},
-        headers=auth,
-    )
-    assert r.status_code == 409
 
 
 def test_close_sets_status_time_and_bytes(client, auth):

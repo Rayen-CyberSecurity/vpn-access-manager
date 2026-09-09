@@ -1,10 +1,10 @@
-"""Thin HTTP wrapper. Contains no business rules on purpose."""
+"""Thin HTTP wrapper for the VPN Access Manager API."""
 
 import requests
 
 
 class ApiError(Exception):
-    """Carries the server's own message so the UI can show it verbatim."""
+    """Carry an API error message to the user interface."""
 
     def __init__(self, message: str, status_code: int | None = None):
         super().__init__(message)
@@ -21,45 +21,53 @@ class ApiClient:
     def _call(self, method: str, path: str, **kwargs):
         url = f"{self.base_url}{path}"
         headers = kwargs.pop("headers", {})
+
         if method != "GET":
             headers["X-API-Key"] = self.api_key
+
         try:
-            r = requests.request(
-                method, url, headers=headers, timeout=self.timeout, **kwargs
+            response = requests.request(
+                method,
+                url,
+                headers=headers,
+                timeout=self.timeout,
+                **kwargs,
             )
         except requests.exceptions.ConnectionError:
             raise ApiError(f"Cannot reach the server at {self.base_url}.")
         except requests.exceptions.Timeout:
             raise ApiError("The server did not respond in time.")
 
-        if r.status_code >= 400:
+        if response.status_code >= 400:
             try:
-                detail = r.json()["detail"]
-                if isinstance(detail, list):        # 422 from Pydantic
-                    detail = "; ".join(d.get("msg", str(d)) for d in detail)
+                detail = response.json()["detail"]
+                if isinstance(detail, list):
+                    detail = "; ".join(
+                        item.get("msg", str(item)) for item in detail
+                    )
             except Exception:
-                detail = f"HTTP {r.status_code}"
-            raise ApiError(str(detail), r.status_code)
+                detail = f"HTTP {response.status_code}"
 
-        return r.json()
+            raise ApiError(str(detail), response.status_code)
 
-    # ---- endpoints ----
-    def health(self):
-        return self._call("GET", "/health")
-
-    def users(self):
-        return self._call("GET", "/users")
+        return response.json()
 
     def gateways(self):
         return self._call("GET", "/gateways")
 
     def sessions(self, status=None, gateway=None):
         params = {}
+
         if status:
             params["status"] = status
+
         if gateway:
             params["gateway"] = gateway
+
         return self._call("GET", "/sessions", params=params)
+
+    def get_session(self, session_id: int):
+        return self._call("GET", f"/sessions/{session_id}")
 
     def open_session(self, user_id: int, gateway_id: int, client_ip: str):
         return self._call(

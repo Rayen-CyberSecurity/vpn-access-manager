@@ -2,7 +2,7 @@
 # Build a single-file binary with PyInstaller, then wrap it in a .deb with fpm.
 set -euo pipefail
 
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-0.1.0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND="$(dirname "$HERE")"
 ROOT="$(dirname "$FRONTEND")"
@@ -40,6 +40,7 @@ rm -f "vpn-manager_${VERSION}_amd64.deb"
 fpm -s dir -t deb \
     -n vpn-manager \
     -v "$VERSION" \
+    --url "https://github.com/Rayen-CyberSecurity/vpn-access-manager" \
     -a amd64 \
     --description "Desktop client for the VPN Access Manager" \
     --maintainer "Rayen <rayenbhr31@gmail.com>" \

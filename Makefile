@@ -27,7 +27,7 @@ $(OUTDIR):
 	mkdir -p $(OUTDIR)
 
 $(OUTDIR)/%.pdf: %.tex $(STYLE) | $(OUTDIR)
-	$(TEXENV) $(LATEXMK) $(LMKFLAGS) $
+	$(TEXENV) $(LATEXMK) $(LMKFLAGS) $<
 
 clean:
 	rm -f $(addprefix $(OUTDIR)/, *.aux *.log *.fdb_latexmk *.fls *.out *.toc *.synctex.gz)

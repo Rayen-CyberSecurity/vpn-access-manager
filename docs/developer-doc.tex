@@ -1,28 +1,28 @@
 % ============================================================
-%  TERM PROJECT – EXAMPLE DOCUMENTATION
+%  TERM PROJECT — DEVELOPER DOCUMENTATION
 %  Databases · THGA Bochum
-%
-%  This is a worked example of the *documentation* deliverable.
-%  It shows the expected structure and level of detail. Your own
-%  documentation describes your own application.
 % ============================================================
 \documentclass[11pt,a4paper]{article}
 
 \usepackage{thga-db}
+\usepackage{graphicx}
+\usepackage{float}
 
 \renewcommand{\thgaKurs}{Databases}
 \renewcommand{\thgaDatum}{Summer Term 2026}
 
 \begin{document}
 \thispagestyle{empty}
-\thgaTitel{Term Project – Documentation (Example)}%
-{Club Library: a database-backed lending system}
+
+\thgaTitel{Term Project — Documentation}%
+{VPN Access Manager}
 
 \begin{infobox}
-\textbf{Author:} Jane Doe (example) \\
+\textbf{Author:} Rayen Ben Haj Rhouma \\
 \textbf{Module:} Introduction to Database Management Systems · THGA Bochum \\
 \textbf{Stack:} PostgreSQL · FastAPI · Docker Compose · tkinter (\texttt{.deb}) \\
-\textbf{Repository:} \url{https://github.com/<user>/club-library}
+\textbf{Version:} 0.1.0 \\
+\textbf{Repository:} \url{https://github.com/Rayen-CyberSecurity/vpn-access-manager}
 \end{infobox}
 
 \tableofcontents
@@ -32,223 +32,628 @@
 \section{Introduction and motivation}
 % ============================================================
 
-Small clubs often manage their library with a spreadsheet: one row per book, a
-column scribbled with the current borrower. This breaks down as soon as two
-people edit the file, and it cannot answer questions such as \emph{``which books
-are currently on loan?''} without manual counting.
+VPN Access Manager is a small database application for managing VPN
+connections across several gateways.
 
-\textbf{Club Library} replaces that spreadsheet with a proper relational system.
-It manages \textbf{books}, \textbf{members} and \textbf{loans}, exposes the data
-through a REST API and offers a small desktop frontend for the librarian.
+The system stores organisational departments, VPN users, gateways and VPN
+sessions. It allows an administrator to see which sessions are currently
+active, inspect previous sessions, open new sessions and close existing ones.
 
-\begin{beispielbox}
-\textbf{Usage scenario.} A member returns two books. The librarian opens the
-frontend, searches for the member, sees their two open loans and marks both as
-returned. The stock counters update immediately, and the ``available books''
-view now lists both titles again.
-\end{beispielbox}
+An important business rule is gateway capacity. Each gateway has a configured
+maximum number of simultaneous active sessions. Before a new session is
+created, the application verifies that the selected gateway still has
+available capacity.
+
+The project consists of three main components:
+
+\begin{itemize}
+    \item a \textbf{PostgreSQL} relational database,
+    \item a \textbf{FastAPI} REST API,
+    \item a \textbf{tkinter} desktop frontend.
+\end{itemize}
+
+The communication path is:
+
+\begin{verbatim}
+tkinter frontend  --->  FastAPI REST API  --->  PostgreSQL
+                       HTTP / JSON
+\end{verbatim}
+
+The frontend never communicates directly with PostgreSQL. All database access
+is performed by the API.
 
 % ============================================================
 \section{Data model}
 % ============================================================
 
-The domain has three entity types. A \textbf{member} can borrow many
-\textbf{books} over time, and a book can be borrowed by many members -- an
-\texttt{N:M} relationship that is resolved by the \textbf{loan} entity (L 02,
-L 03).
+The relational model contains four entities.
 
-\begin{beispielbox}
-\textbf{ER model (textual).}
-\begin{itemize}[leftmargin=1.4em, topsep=2pt]
-  \item \textbf{member} (1) \;--\; borrows \;--\; (N) \textbf{loan}
-  \item \textbf{book} (1) \;--\; is borrowed in \;--\; (N) \textbf{loan}
-\end{itemize}
-Thus \textbf{member} \texttt{N:M} \textbf{book}, resolved through
-\textbf{loan}.
-\end{beispielbox}
+\begin{description}
 
+    \item[department]
+    Represents an organisational department.
+
+    \item[vpn\_user]
+    Represents a person who may establish VPN sessions. The table is called
+    \texttt{vpn\_user} rather than \texttt{user} to avoid confusion with the
+    PostgreSQL user concept.
+
+    \item[gateway]
+    Represents a VPN gateway. Each gateway belongs to a region, has a public IP
+    address and defines the maximum number of simultaneous sessions.
+
+    \item[session]
+    Represents one VPN connection between a user and a gateway.
+
+\end{description}
+
+A department can contain many VPN users.
+
+A VPN user can have multiple sessions over time, and a gateway can also
+participate in multiple sessions. The \texttt{session} table therefore
+resolves the many-to-many relationship between users and gateways while also
+storing attributes of the connection itself.
+
+% ------------------------------------------------------------
 \subsection{Relational schema}
+% ------------------------------------------------------------
 
-Derived from the ER model, with primary keys underlined and foreign keys in
-italics:
+The implemented schema is:
 
-\begin{itemize}[leftmargin=1.4em]
-  \item \texttt{member}(\underline{id}, name, email)
-  \item \texttt{book}(\underline{id}, title, author, isbn, stock)
-  \item \texttt{loan}(\underline{id}, \emph{member\_id}, \emph{book\_id},
-        borrowed\_on, due\_on, returned\_on)
+\begin{verbatim}
+department(
+    id,
+    name,
+    contact_email
+)
+
+vpn_user(
+    id,
+    username,
+    email,
+    department_id -> department.id
+)
+
+gateway(
+    id,
+    name,
+    region,
+    public_ip,
+    max_sessions
+)
+
+session(
+    id,
+    status,
+    client_ip,
+    connected_at,
+    disconnected_at,
+    bytes_transferred,
+    user_id -> vpn_user.id,
+    gateway_id -> gateway.id
+)
+\end{verbatim}
+
+The primary keys are integer identifiers generated by PostgreSQL.
+
+Foreign keys connect VPN users to departments and sessions to both users and
+gateways.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{img/db-schema-check.png}
+\caption{Implemented tables and columns in PostgreSQL.}
+\end{figure}
+
+% ============================================================
+\section{Database implementation}
+% ============================================================
+
+The complete database definition and seed data are stored in
+\texttt{db/init.sql}.
+
+Docker Compose mounts this file into PostgreSQL's initialization directory.
+When the database is created with a fresh volume, PostgreSQL executes the
+script automatically.
+
+This makes it possible to reproduce the initial database without manually
+creating tables.
+
+% ------------------------------------------------------------
+\subsection{Database constraints}
+% ------------------------------------------------------------
+
+The schema uses primary keys, foreign keys, unique constraints and check
+constraints to protect data integrity.
+
+Important rules include:
+
+\begin{itemize}
+
+    \item \texttt{vpn\_user.username} is unique.
+
+    \item \texttt{gateway.name} is unique.
+
+    \item \texttt{gateway.max\_sessions} must be greater than zero.
+
+    \item session status must be either \texttt{active} or \texttt{closed}.
+
+    \item an active session cannot already have a disconnection timestamp.
+
+    \item if \texttt{disconnected\_at} is present, it cannot be earlier than
+          \texttt{connected\_at}.
+
+    \item every session references an existing VPN user and gateway.
+
 \end{itemize}
 
-\textbf{Normalisation.} Every non-key attribute depends only on the whole
-primary key of its table, and there are no transitive dependencies: a member's
-email lives only in \texttt{member}, a book's author only in \texttt{book}, and
-a loan references members and books by their keys rather than duplicating their
-data. The schema is therefore in \textbf{3NF} (L 04).
+These rules prevent invalid records from being stored even if an incorrect
+request reaches the database layer.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{img/db-constraints.png}
+\caption{Constraints defined on the four database tables.}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{Gateway capacity}
+% ------------------------------------------------------------
+
+Gateway capacity is different from the row-level constraints above.
+
+The maximum number of active sessions depends on the number of
+\emph{other session rows} that currently reference the same gateway.
+Therefore, the rule is checked by the API before inserting a new session.
+
+The API first retrieves the requested gateway and then counts its active
+sessions.
+
+Conceptually:
+
+\begin{verbatim}
+gateway = SELECT gateway by id
+
+active = SELECT COUNT(*)
+         FROM session
+         WHERE gateway_id = requested gateway
+           AND status = 'active'
+
+if active >= gateway.max_sessions:
+    reject request
+
+otherwise:
+    INSERT new active session
+\end{verbatim}
+
+If the gateway has reached its limit, the API returns HTTP status
+\texttt{409 Conflict} and no session is inserted.
+
+For example, if \texttt{gw-eu-1} has three active sessions and
+\texttt{max\_sessions = 3}, another session request is refused.
 
 % ============================================================
-\section{Database (PostgreSQL)}
+\section{REST API}
 % ============================================================
 
-The schema and seed data are created by an init script that PostgreSQL runs on
-first start (L 07, L 09).
+The API is implemented with FastAPI.
 
-\begin{lstlisting}[language=SQL, caption={init.sql (excerpt) -- schema and seed data}]
-CREATE TABLE member (
-    id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name  VARCHAR(120) NOT NULL,
-    email VARCHAR(200) UNIQUE
-);
+Pydantic models are used for request validation and response models.
+Database statements use parameters rather than inserting user-provided values
+directly into SQL strings.
 
-CREATE TABLE book (
-    id     INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    title  VARCHAR(200) NOT NULL,
-    author VARCHAR(120) NOT NULL,
-    isbn   CHAR(13) UNIQUE,
-    stock  INTEGER NOT NULL DEFAULT 1 CHECK (stock >= 0)
-);
+The project exposes exactly five REST operations:
 
-CREATE TABLE loan (
-    id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    member_id    INTEGER NOT NULL REFERENCES member(id),
-    book_id      INTEGER NOT NULL REFERENCES book(id),
-    borrowed_on  DATE NOT NULL DEFAULT CURRENT_DATE,
-    due_on       DATE NOT NULL,
-    returned_on  DATE
-);
-\end{lstlisting}
+\begin{center}
+\begin{tabular}{|l|l|p{6cm}|}
+\hline
+\textbf{Method} & \textbf{Path} & \textbf{Purpose} \\
+\hline
+GET &
+\texttt{/gateways} &
+List gateways with their current active-session counts. \\
+\hline
+
+GET &
+\texttt{/sessions} &
+List sessions, optionally filtered by status or gateway. \\
+\hline
+
+GET &
+\texttt{/sessions/\{id\}} &
+Return one session and its related information. \\
+\hline
+
+POST &
+\texttt{/sessions} &
+Open a new VPN session. \\
+\hline
+
+POST &
+\texttt{/sessions/\{id\}/close} &
+Close an existing VPN session. \\
+\hline
+\end{tabular}
+\end{center}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{img/api-openapi-docs.png}
+\caption{FastAPI OpenAPI documentation showing the five REST operations.}
+\end{figure}
+
+% ------------------------------------------------------------
+\subsection{Reading sessions}
+% ------------------------------------------------------------
+
+The session list combines information from several tables.
+
+The API joins:
+
+\begin{verbatim}
+session
+vpn_user
+department
+gateway
+\end{verbatim}
+
+so that a client can receive useful information such as username, department
+and gateway name without issuing separate requests.
+
+The endpoint supports optional filters.
+
+Examples:
+
+\begin{verbatim}
+GET /sessions?status=active
+GET /sessions?gateway=gw-eu-1
+GET /sessions?status=active&gateway=gw-eu-1
+\end{verbatim}
+
+% ------------------------------------------------------------
+\subsection{Opening a session}
+% ------------------------------------------------------------
+
+A request to
+
+\begin{verbatim}
+POST /sessions
+\end{verbatim}
+
+contains:
+
+\begin{verbatim}
+{
+    "user_id": 7,
+    "gateway_id": 1,
+    "client_ip": "192.168.50.10"
+}
+\end{verbatim}
+
+Before insertion, the API verifies that the referenced user and gateway exist
+and that the gateway has available capacity.
+
+A successful creation returns HTTP status \texttt{201 Created}.
+
+Invalid requests return an appropriate 4xx response.
+
+% ------------------------------------------------------------
+\subsection{Closing a session}
+% ------------------------------------------------------------
+
+A session is closed with:
+
+\begin{verbatim}
+POST /sessions/{id}/close
+\end{verbatim}
+
+Closing changes the status to \texttt{closed}, records the disconnection time
+and stores the transferred byte count.
+
+The operation is idempotent. If a session is already closed, another close
+request returns the existing record without replacing its original closing
+information.
+
+% ------------------------------------------------------------
+\subsection{API key}
+% ------------------------------------------------------------
+
+Read operations do not require authentication.
+
+Operations that modify data require the HTTP header:
+
+\begin{verbatim}
+X-API-Key: <configured key>
+\end{verbatim}
+
+A missing or invalid key returns:
+
+\begin{verbatim}
+401 Unauthorized
+\end{verbatim}
+
+The expected key is loaded from the application configuration rather than
+being written directly into an endpoint.
 
 % ============================================================
-\section{REST API (FastAPI)}
+\section{Database access and transactions}
 % ============================================================
 
-The API is the only component that talks to the database (L 08). Read endpoints
-are public; write endpoints require the header \texttt{X-API-Key} (cf.\ DBMS\_09).
+Database access is implemented with psycopg.
 
-\renewcommand{\arraystretch}{1.2}
-\begin{tabularx}{\linewidth}{@{}p{1.6cm}p{4.4cm}Xc@{}}
-\toprule
-\textbf{Method} & \textbf{Path} & \textbf{Purpose} & \textbf{Key} \\
-\midrule
-\texttt{GET}  & \texttt{/books} & books + count of open loans (JOIN + agg.) & -- \\
-\texttt{GET}  & \texttt{/members/\{id\}/loans} & open loans of a member (JOIN) & -- \\
-\texttt{POST} & \texttt{/loans} & lend a book & yes \\
-\texttt{POST} & \texttt{/returns} & return a book & yes \\
-\bottomrule
-\end{tabularx}
+Two context managers are defined in \texttt{api/db.py}:
 
-\medskip
-The \texttt{/books} endpoint demonstrates a \textbf{JOIN} combined with an
-\textbf{aggregation} (L 06): it counts how many copies of each book are
-currently on loan.
+\begin{description}
 
-\begin{lstlisting}[language=SQL, caption={Query behind GET /books (JOIN + aggregation)}]
-SELECT b.id, b.title, b.author, b.stock,
-       COUNT(l.id) FILTER (WHERE l.returned_on IS NULL) AS on_loan
-FROM book b
-LEFT JOIN loan l ON l.book_id = b.id
-GROUP BY b.id
-ORDER BY b.title;
-\end{lstlisting}
+    \item[query()]
+    Opens a connection for read operations.
 
-The write path is guarded by a dependency that checks the API key -- adapted
-from the DBMS\_09 exercise:
+    \item[transaction()]
+    Opens a connection for write operations and explicitly commits successful
+    operations or rolls back when an exception occurs.
 
-\begin{lstlisting}[language=Python, caption={API-key guard (adapted from DBMS\_09)}]
-from fastapi import Header, HTTPException
-import os
+\end{description}
 
-def require_api_key(x_api_key: str = Header(...)):
-    if x_api_key != os.environ["API_KEY"]:
-        raise HTTPException(status_code=401, detail="invalid API key")
-\end{lstlisting}
+A simplified representation is:
+
+\begin{verbatim}
+with psycopg.connect(...) as conn:
+    try:
+        perform database operation
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+\end{verbatim}
+
+This prevents a failed write operation from leaving a partially completed
+change in the database.
 
 % ============================================================
-\section{Frontend (tkinter, packaged as .deb)}
+\section{Desktop frontend}
 % ============================================================
 
-The frontend is a small tkinter application with two tabs: \textbf{Books} (a
-searchable table backed by \texttt{GET /books}) and \textbf{Loans} (a form that
-calls \texttt{POST /loans} and \texttt{POST /returns}). It never touches the
-database directly -- it only calls the API (L 10).
+The desktop frontend is implemented with tkinter.
 
-At startup a \textbf{connection dialog} asks for the API URL and the
-\texttt{X-API-Key}; the key is kept in memory for the session only and is never
-written to disk.
+It contains no SQL and does not import a PostgreSQL database driver. Instead,
+\texttt{frontend/api\_client.py} provides a small HTTP wrapper around the
+REST API.
 
-\textbf{Packaging.} The application is frozen with PyInstaller and wrapped into a
-Debian package with \texttt{fpm} (L 13), so the lecturer can install and run it
-on the lecture server:
+The frontend consists of four principal screens:
 
-\begin{lstlisting}[caption={Building and installing the .deb}]
-uv run pyinstaller --name club-library --onedir src/club_library/__main__.py
-mkdir -p pkg/usr/bin && cp -r dist/club-library pkg/usr/bin/
-fpm -s dir -t deb --name club-library --version 0.1.0 -C pkg .
-sudo dpkg -i club-library_0.1.0_amd64.deb
-\end{lstlisting}
+\begin{enumerate}
 
-% ============================================================
-\section{Operation and deployment}
-% ============================================================
+    \item connection dialog,
 
-The backend runs as two containers, orchestrated by Docker Compose and deployed
-on the lecture server (L 09). Credentials live in a \texttt{.env} file that is
-not committed.
+    \item main gateway and session overview,
 
-\begin{lstlisting}[caption={docker-compose.yml (excerpt, after L 09)}]
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-  api:
-    build: ./api
-    environment:
-      API_KEY: ${API_KEY}
-    env_file: .env
-    ports: ["8000:8000"]
-    depends_on: [postgres]
-volumes:
-  pg_data:
-\end{lstlisting}
+    \item new-session dialog,
 
-\textbf{Deployment steps on the lecture server.}
-\begin{enumerate}[leftmargin=1.6em, topsep=2pt]
-  \item \texttt{docker compose up -d} -- start database and API.
-  \item \texttt{sudo dpkg -i club-library\_0.1.0\_amd64.deb} -- install the
-        frontend.
-  \item Launch \texttt{club-library}, enter the API URL and the
-        \texttt{X-API-Key} in the connection dialog.
+    \item session-detail dialog.
+
 \end{enumerate}
 
+The main window displays gateway capacity and the session history.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{img/fe-main.png}
+\caption{Desktop frontend showing gateway capacity and session information.}
+\end{figure}
+
+The available actions are:
+
+\begin{itemize}
+    \item open a new session,
+    \item view session details,
+    \item disconnect an active session,
+    \item refresh the displayed data.
+\end{itemize}
+
+The frontend does not implement the capacity rule itself. The server remains
+responsible for deciding whether a session may be created. If the API refuses
+the request, the frontend displays the returned error message.
+
+This keeps the business rule in one place instead of duplicating it in the
+desktop application.
+
 % ============================================================
-\section{Reflection}
+\section{Docker deployment}
 % ============================================================
 
-The separation into database, API and frontend paid off: the API-key guard and
-the aggregation query could be tested with \texttt{curl} long before the
-frontend existed. The trickiest part was \textbf{return handling} when several
-copies of the same book are on loan at once -- solved by matching a return to
-the oldest open loan of that book. Given more time, transaction isolation
-(L 11) would make concurrent returns fully safe.
+Docker Compose is used to run PostgreSQL and the FastAPI service.
+
+The application can be started with:
+
+\begin{verbatim}
+cp .env.example .env
+docker compose up -d --build
+\end{verbatim}
+
+The PostgreSQL container uses a health check. The API service waits for the
+database service to become healthy before starting.
+
+The API is exposed on port:
+
+\begin{verbatim}
+8000
+\end{verbatim}
+
+FastAPI's interactive OpenAPI documentation is available at:
+
+\begin{verbatim}
+http://localhost:8000/docs
+\end{verbatim}
+
+Configuration values such as the database connection URL and API key are
+loaded from environment variables.
+
+% ============================================================
+\section{Testing}
+% ============================================================
+
+The automated test suite uses pytest and FastAPI's TestClient.
+
+The tests cover the principal acceptance criteria of the project, including:
+
+\begin{itemize}
+
+    \item the five required API operations,
+
+    \item gateway active-session counts,
+
+    \item gateways with zero active sessions,
+
+    \item session retrieval,
+
+    \item status filtering,
+
+    \item gateway filtering,
+
+    \item opening a valid session,
+
+    \item rejection of nonexistent users or gateways,
+
+    \item rejection when a gateway is at capacity,
+
+    \item API-key protection for write operations,
+
+    \item closing a session,
+
+    \item idempotent repeated closing,
+
+    \item database constraints.
+
+\end{itemize}
+
+The final test run contains 30 passing tests.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{img/test-suite-green.png}
+\caption{Final pytest run: all 30 tests pass.}
+\end{figure}
+
+The test database is reset from \texttt{db/init.sql}, providing a predictable
+seed state for the tests.
+
+% ============================================================
+\section{Desktop packaging}
+% ============================================================
+
+The tkinter client is distributed as a Debian package.
+
+The packaging script is:
+
+\begin{verbatim}
+frontend/packaging/build-deb.sh
+\end{verbatim}
+
+PyInstaller first creates the executable application. The script then stages
+the executable together with its desktop entry and uses \texttt{fpm} to
+produce:
+
+\begin{verbatim}
+vpn-manager_0.1.0_amd64.deb
+\end{verbatim}
+
+The package declares the required Linux graphical libraries as Debian
+dependencies.
+
+After installation, the client can be started with:
+
+\begin{verbatim}
+vpn-manager
+\end{verbatim}
+
+% ============================================================
+\section{Project structure}
+% ============================================================
+
+The main project files are organised as follows:
+
+\begin{verbatim}
+vpn-access-manager/
+|
+|-- api/
+|   |-- config.py
+|   |-- db.py
+|   |-- main.py
+|   |-- models.py
+|   `-- security.py
+|
+|-- db/
+|   `-- init.sql
+|
+|-- frontend/
+|   |-- api_client.py
+|   |-- app.py
+|   `-- packaging/
+|       `-- build-deb.sh
+|
+|-- tests/
+|
+|-- docs/
+|   |-- developer-doc.tex
+|   |-- user-manual.tex
+|   `-- img/
+|
+|-- docker-compose.yml
+|-- Dockerfile
+|-- requirements.txt
+|-- pyproject.toml
+`-- Makefile
+\end{verbatim}
+
+This separation keeps database definition, API logic, user interface,
+automated tests and documentation independent from each other.
+
+% ============================================================
+\section{Reflection and limitations}
+% ============================================================
+
+The project demonstrates how database constraints and application-level
+business rules complement each other.
+
+Rules concerning a single stored value or row are enforced directly by
+PostgreSQL where possible. Gateway capacity, however, requires counting active
+session rows and is therefore checked by the API before a new session is
+inserted.
+
+Transactions are used for write operations so that unsuccessful operations
+can be rolled back.
+
+The REST API also creates a clear boundary between the database and the user
+interface. The desktop application does not need to know the database schema
+or PostgreSQL credentials.
+
+The project deliberately remains small. It records VPN session information,
+but it does not establish real VPN tunnels, authenticate against a real VPN
+server, or collect network traffic automatically.
+
+A single API key protects write operations. Per-user authentication and roles
+are outside the scope of this version.
+
+Possible future extensions include:
+
+\begin{itemize}
+    \item individual administrator accounts and roles,
+    \item integration with real VPN gateways,
+    \item automatic collection of traffic statistics,
+    \item reporting and utilisation dashboards.
+\end{itemize}
 
 % ============================================================
 \section*{Sources and reuse}
 % ============================================================
-\addcontentsline{toc}{section}{Sources and reuse}
 
-Reused with attribution, as permitted:
-\begin{itemize}[leftmargin=1.4em, topsep=2pt]
-  \item API-key guard and Compose file structure -- adapted from
-        \textbf{DBMS\_09} and \textbf{lecture 09}.
-  \item tkinter connection dialog and \texttt{Treeview} layout -- adapted from
-        \textbf{DBMS\_09 (frontend)} and \textbf{lecture 10}.
-  \item PyInstaller / \texttt{fpm} packaging commands -- after \textbf{lecture
-        13}.
-\end{itemize}
+The implementation uses the documentation of PostgreSQL, FastAPI, Pydantic,
+psycopg, Docker, PyInstaller and fpm as technical references.
+
+The document style and Makefile structure were adapted from the DBMS course
+material.
+
+All application-specific database design, API implementation, frontend,
+tests and project documentation were produced for this term project.
 
 \end{document}
