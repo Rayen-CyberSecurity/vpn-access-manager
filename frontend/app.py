@@ -60,8 +60,10 @@ class ConnectDialog(tk.Toplevel):
 
         self.bind("<Return>", lambda _event: self.attempt())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.grab_set()
 
+        self.update_idletasks()
+        self.wait_visibility()
+        self.grab_set()
     def attempt(self):
         client = ApiClient(
             self.url.get().strip(),
@@ -184,7 +186,11 @@ class NewSessionDialog(tk.Toplevel):
             pady=(12, 0),
         )
 
+        self.update_idletasks()
+        self.wait_visibility()
+
         self.grab_set()
+
 
     def submit(self):
         try:
@@ -275,6 +281,9 @@ class SessionDetailDialog(tk.Toplevel):
             pady=(12, 0),
         )
 
+
+        self.update_idletasks()
+        self.wait_visibility()
         self.grab_set()
 
 
