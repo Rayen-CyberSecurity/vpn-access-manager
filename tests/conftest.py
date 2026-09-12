@@ -5,7 +5,16 @@ the seed state (gw-eu-1 full, gw-us-1 empty) is guaranteed each time. That is
 what lets the capacity tests assume a full gateway without setting one up.
 """
 
+import os
 import pathlib
+
+# Tests run on the host machine, outside the Docker Compose network.
+# Therefore PostgreSQL is reached through localhost instead of the Docker
+# service hostname "db".
+os.environ["DATABASE_URL"] = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql://vpnadmin:vpnpass123@localhost:5432/vpnmanager",
+)
 
 import psycopg
 import pytest
