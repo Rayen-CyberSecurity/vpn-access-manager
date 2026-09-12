@@ -34,6 +34,32 @@ To run the desktop client from source:
 - Python dependencies from `requirements.txt`
 
 ## 1. Start Database and API
+### Configure the environment
+
+Create the local environment file from the provided example:
+
+```bash
+cp .env.example .env
+```
+
+The `.env` file contains the configuration used by Docker Compose. For the default local setup, use:
+
+```env
+POSTGRES_USER=vpnadmin
+POSTGRES_PASSWORD=vpnpass123
+POSTGRES_DB=vpnmanager
+DATABASE_URL=postgresql://vpnadmin:vpnpass123@db:5432/vpnmanager
+API_KEY=dev-key
+```
+
+When running with Docker Compose, the database hostname is `db`, which is the PostgreSQL service name defined in `docker-compose.yml`.
+
+The `.env` file is excluded from Git and must not be committed.
+
+### Start the services
+
+
+
 
 From the project directory:
 
